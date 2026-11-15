@@ -177,63 +177,26 @@ func antigravityTranscript(_ id: String) throws -> [Message] {
 
 // MARK: - Views
 
-/// Splits Markdown into prose and fenced code blocks; prose gets inline Markdown only
-struct MarkdownText: View {
-    let source: String
-
-    var parts: [(code: Bool, text: String)] {
-        var result: [(Bool, String)] = []
-        var current: [Substring] = [], inCode = false
-        for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
-                if !current.isEmpty || inCode { result.append((inCode, current.joined(separator: "\n"))) }
-                current = []
-                inCode.toggle()
-            } else {
-                current.append(line)
-            }
-        }
-        if !current.isEmpty { result.append((inCode, current.joined(separator: "\n"))) }
-        return result.filter { $0.0 || !$0.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
-                if part.code {
-                    Text(part.text)
-                        .font(.system(.callout, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                } else {
-                    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-                    Text((try? AttributedString(markdown: part.text.trimmingCharacters(in: .newlines), options: options))
-                         ?? AttributedString(part.text))
-                }
-            }
-        }
-    }
-}
-
 struct MessageView: View {
     let message: Message
+    let fontSize: Double
 
     var body: some View {
         switch message.role {
         case .user:
             HStack {
-                Spacer(minLength: 60)
-                MarkdownText(source: message.text)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Spacer(minLength: 80)
+                MarkdownText(source: message.text, fontSize: fontSize)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         case .assistant:
-            MarkdownText(source: message.text)
+            MarkdownText(source: message.text, fontSize: fontSize)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .tools:
-            Label("\(message.toolCount) tool calls", systemImage: "wrench.and.screwdriver")
-                .font(.caption).foregroundStyle(.secondary)
+            Label("^[\(message.toolCount) tool call](inflect: true)", systemImage: "wrench.and.screwdriver")
+                .font(.system(size: fontSize - 2))
+                .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -243,66 +206,80 @@ struct TranscriptView: View {
     let session: Session
     @State private var messages: [Message]?
     @State private var error: String?
+    @AppStorage("fontSize") private var fontSize = defaultFontSize
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            if let error {
-                ContentUnavailableView(error, systemImage: "exclamationmark.triangle")
-            } else if let messages {
-                if messages.isEmpty {
-                    ContentUnavailableView("No Messages", systemImage: "text.bubble")
-                } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 16) {
-                            ForEach(messages) { MessageView(message: $0) }
-                        }
-                        .textSelection(.enabled)
-                        .padding(20)
-                    }
+        content
+            .task(id: session.id) {
+                messages = nil
+                error = nil
+                let session = session
+                do {
+                    messages = try await Task.detached { try loadTranscript(session) }.value
+                } catch {
+                    self.error = error.localizedDescription
                 }
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }
-        .task(id: session.id) {
-            messages = nil
-            error = nil
-            let session = session
-            do {
-                messages = try await Task.detached { try loadTranscript(session) }.value
-            } catch {
-                self.error = error.localizedDescription
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Menu {
+                        CopyMenuItems(session: session)
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    } primaryAction: {
+                        copy(session.reference)
+                    }
+                    .help(String(localized: "Copy Reference") + ": " + session.reference)
+                    Button {
+                        openInTerminal(session)
+                    } label: {
+                        Label("Resume", systemImage: "play.fill")
+                    }
+                    .help(String(localized: "Open in \(terminalName)") + ": " + session.command)
+                }
             }
+    }
+
+    @ViewBuilder var content: some View {
+        if let error {
+            ContentUnavailableView(error, systemImage: "exclamationmark.triangle")
+        } else if let messages {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: fontSize * 1.4) {
+                    header
+                    if messages.isEmpty {
+                        Text("No Messages").foregroundStyle(.secondary)
+                    }
+                    ForEach(messages) { MessageView(message: $0, fontSize: fontSize) }
+                }
+                .textSelection(.enabled)
+                // A readable measure, centered in wide windows
+                .frame(maxWidth: fontSize * 58)
+                .padding(.horizontal, 28).padding(.vertical, 24)
+                .frame(maxWidth: .infinity)
+            }
+            // Open at the latest messages, where the session left off
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+        } else {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     var header: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ToolIcon(tool: session.tool)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(session.title).font(.headline).lineLimit(2)
-                Text(displayPath(session.cwd)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(session.title)
+                .font(.system(size: fontSize * 1.6, weight: .bold))
+            HStack(spacing: 6) {
+                ToolIcon(tool: session.tool, size: fontSize * 1.3)
+                Text(session.tool.name)
+                Text("·")
+                Text(displayPath(session.cwd)).lineLimit(1).truncationMode(.middle)
+                Text("·")
+                Text(session.updated.formatted(date: .abbreviated, time: .shortened))
             }
-            Spacer()
-            Menu {
-                CopyMenuItems(session: session)
-            } label: {
-                Label("Copy", systemImage: "doc.on.doc")
-            } primaryAction: {
-                copy(session.reference)
-            }
-            .fixedSize()
-            .help(String(localized: "Copy Reference") + ": " + session.reference)
-            Button {
-                openInTerminal(session)
-            } label: {
-                Label("Resume", systemImage: "apple.terminal")
-            }
-            .buttonStyle(.borderedProminent)
-            .help(String(localized: "Open in \(terminalName)") + ": " + session.command)
+            .font(.system(size: fontSize - 1))
+            .foregroundStyle(.secondary)
+            Divider().padding(.top, 6)
         }
-        .padding(.horizontal, 20).padding(.vertical, 12)
     }
 }

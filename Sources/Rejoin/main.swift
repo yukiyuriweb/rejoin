@@ -257,199 +257,24 @@ func folderName(_ cwd: String) -> String {
     cwd.isEmpty ? String(localized: "No Directory") : URL(fileURLWithPath: cwd).lastPathComponent
 }
 
-/// A small rounded square in the tool's color with a symbol for it
-struct ToolIcon: View {
-    let tool: Tool
 
-    var symbol: String {
-        switch tool {
-        case .codex: "terminal.fill"
-        case .claude: "asterisk"
-        case .antigravity: "arrow.up"
-        case .copilot: "airplane"
+/// Base text size for the conversation; View > Bigger / Smaller change it
+let defaultFontSize = 13.0
+let fontSizeRange = 10.0...24.0
+
+struct FontSizeCommands: Commands {
+    @AppStorage("fontSize") private var fontSize = defaultFontSize
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Divider()
+            Button("Bigger") { fontSize = min(fontSize + 1, fontSizeRange.upperBound) }
+                .keyboardShortcut("+")
+            Button("Smaller") { fontSize = max(fontSize - 1, fontSizeRange.lowerBound) }
+                .keyboardShortcut("-")
+            Button("Actual Size") { fontSize = defaultFontSize }
+                .keyboardShortcut("0")
         }
-    }
-
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 26, height: 26)
-            .background(tool.color.gradient, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-    }
-}
-
-struct SessionRow: View {
-    let session: Session
-    let showFolder: Bool
-    @State private var hovering = false
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ToolIcon(tool: session.tool)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(session.title).lineLimit(1)
-                HStack(spacing: 4) {
-                    Text(session.tool.name)
-                    Text("·")
-                    Text(session.updated, format: .relative(presentation: .named))
-                    if showFolder {
-                        Text("·")
-                        Image(systemName: "folder").imageScale(.small)
-                        Text(folderName(session.cwd))
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            if hovering {
-                Button {
-                    openInTerminal(session)
-                } label: {
-                    Image(systemName: "apple.terminal")
-                }
-                .buttonStyle(.borderless)
-                .help(String(localized: "Open in \(terminalName)") + ": " + session.command)
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-    }
-}
-
-struct CopyMenuItems: View {
-    let session: Session
-
-    var body: some View {
-        Button("Copy Reference") { copy(session.reference) }
-        Button("Copy ID") { copy(session.sessionID) }
-        Button("Copy Title") { copy(session.title) }
-        Divider()
-        Button("Copy Resume Command") { copy(session.command) }
-        Button("Copy with cd") { copy(session.commandWithCd) }
-    }
-}
-
-enum SidebarItem: Hashable {
-    case all
-    case folder(String)
-}
-
-struct ContentView: View {
-    @EnvironmentObject var store: Store
-    @State private var selection: SidebarItem? = .all
-    @State private var selectedSessionID: String?
-    @State private var search = ""
-    // Raw value of the one tool shown, or empty for all of them
-    @AppStorage("toolFilter") private var toolFilter = ""
-
-    /// Sessions of the chosen tool; the sidebar counts these
-    var toolSessions: [Session] {
-        store.sessions.filter { toolFilter.isEmpty || $0.tool.rawValue == toolFilter }
-    }
-
-    var shownSessions: [Session] {
-        toolSessions.filter { s in
-            if case .folder(let cwd) = selection, s.cwd != cwd { return false }
-            return search.isEmpty || s.title.localizedCaseInsensitiveContains(search) || s.cwd.localizedCaseInsensitiveContains(search)
-        }
-    }
-
-    var body: some View {
-        NavigationSplitView {
-            List(selection: $selection) {
-                Label("All Sessions", systemImage: "tray.full")
-                    .badge(toolSessions.count)
-                    .tag(SidebarItem.all)
-                Section("Directories") {
-                    ForEach(directories(toolSessions), id: \.cwd) { dir in
-                        Label(folderName(dir.cwd), systemImage: "folder")
-                            .badge(dir.count)
-                            .help(displayPath(dir.cwd))
-                            .tag(SidebarItem.folder(dir.cwd))
-                    }
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
-        } content: {
-            sessionList
-                .navigationSplitViewColumnWidth(min: 300, ideal: 380)
-                .navigationTitle(title)
-                .navigationSubtitle(subtitle)
-        } detail: {
-            if let session = session(selectedSessionID) {
-                TranscriptView(session: session)
-            } else {
-                ContentUnavailableView("Select a Session", systemImage: "text.bubble")
-            }
-        }
-        .searchable(text: $search, placement: .toolbar)
-        .toolbar {
-            ToolbarItemGroup {
-                Picker("Tool", selection: $toolFilter) {
-                    Text("All").tag("")
-                    ForEach(Tool.allCases, id: \.self) { Text($0.name).tag($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-                Button { store.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
-                    .keyboardShortcut("r")
-                    .help("Reload")
-            }
-        }
-        .frame(minWidth: 1000, minHeight: 480)
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            store.reload()
-        }
-    }
-
-    @ViewBuilder var sessionList: some View {
-        let sessions = shownSessions
-        if sessions.isEmpty && store.errors.isEmpty {
-            if search.isEmpty {
-                ContentUnavailableView("No Sessions", systemImage: "tray")
-            } else {
-                ContentUnavailableView.search(text: search)
-            }
-        } else {
-            List(selection: $selectedSessionID) {
-                ForEach(store.errors, id: \.self) {
-                    Label($0, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                }
-                ForEach(sessions) { s in
-                    SessionRow(session: s, showFolder: selection == .all || selection == nil)
-                        .tag(s.id)
-                }
-            }
-            .listStyle(.inset)
-            // Double-click or Return resumes the session in the terminal
-            .contextMenu(forSelectionType: String.self) { ids in
-                if let s = session(ids.first) {
-                    Button("Open in \(terminalName)") { openInTerminal(s) }
-                    Divider()
-                    CopyMenuItems(session: s)
-                }
-            } primaryAction: { ids in
-                if let s = session(ids.first) { openInTerminal(s) }
-            }
-            .onCopyCommand {
-                session(selectedSessionID).map { [NSItemProvider(object: $0.reference as NSString)] } ?? []
-            }
-        }
-    }
-
-    func session(_ id: String?) -> Session? {
-        store.sessions.first { $0.id == id }
-    }
-
-    var title: String {
-        if case .folder(let cwd) = selection { return folderName(cwd) }
-        return String(localized: "All Sessions")
-    }
-
-    var subtitle: String {
-        if case .folder(let cwd) = selection { return displayPath(cwd) }
-        return ""
     }
 }
 
@@ -460,6 +285,7 @@ struct RejoinApp: App {
         Window("Rejoin", id: "main") {
             ContentView().environmentObject(store)
         }
+        .commands { FontSizeCommands() }
     }
 }
 

@@ -3,8 +3,6 @@
 "Copy with cd" = "cd 付きでコピー";
 "Copy ID" = "ID をコピー";
 "Reload" = "再読み込み";
-"Tool" = "ツール";
-"All" = "すべて";
 "All Sessions" = "すべてのセッション";
 "Directories" = "ディレクトリ";
 "No Sessions" = "セッションがありません";
@@ -16,7 +14,7 @@
 /* Conversation */
 "Select a Session" = "セッションを選択";
 "No Messages" = "メッセージがありません";
-"%lld tool calls" = "ツール呼び出し %lld 件";
+"^[%lld tool call](inflect: true)" = "ツール呼び出し %lld 件";
 "[Image]" = "[画像]";
 "Resume" = "再開";
 "Open in %@" = "%@ で開く";
@@ -26,3 +24,7 @@
 "Copy" = "コピー";
 "Copy Reference" = "参照をコピー";
 "Copy Title" = "タイトルをコピー";
+"Yesterday" = "昨日";
+"Bigger" = "拡大";
+"Smaller" = "縮小";
+"Actual Size" = "実際のサイズ";
