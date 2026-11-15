@@ -1,12 +1,28 @@
 /* Session list */
-"Copy" = "コピー";
-"Copied" = "コピー済み";
 "Copy Resume Command" = "再開コマンドをコピー";
 "Copy with cd" = "cd 付きでコピー";
 "Copy ID" = "ID をコピー";
 "Reload" = "再読み込み";
-"Tools" = "ツール";
+"Tool" = "ツール";
+"All" = "すべて";
+"All Sessions" = "すべてのセッション";
+"Directories" = "ディレクトリ";
+"No Sessions" = "セッションがありません";
 "No Directory" = "ディレクトリなし";
 
 /* Errors */
 "Could not open %@" = "%@ を開けません";
+
+/* Conversation */
+"Select a Session" = "セッションを選択";
+"No Messages" = "メッセージがありません";
+"%lld tool calls" = "ツール呼び出し %lld 件";
+"[Image]" = "[画像]";
+"Resume" = "再開";
+"Open in %@" = "%@ で開く";
+"The conversation file is gone" = "会話ファイルが見つかりません";
+"Reading older Codex sessions needs zstd (brew install zstd)" = "古い Codex セッションを読むには zstd が必要です（brew install zstd）";
+"zstd could not read the conversation file" = "zstd で会話ファイルを展開できませんでした";
+"Copy" = "コピー";
+"Copy Reference" = "参照をコピー";
+"Copy Title" = "タイトルをコピー";
