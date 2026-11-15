@@ -3,7 +3,7 @@ import SQLite3
 import SwiftUI
 
 enum Tool: String, CaseIterable, Sendable {
-    case codex, claude, antigravity, copilot
+    case claude, codex, antigravity, copilot
 
     var name: String {
         switch self {
@@ -40,15 +40,25 @@ struct Session: Identifiable, Sendable {
     let title: String
     let cwd: String
     let updated: Date
+    /// The JSONL holding the conversation, for the tools that keep one per session
+    var transcriptPath = ""
 
     var command: String { tool.resumeCommand(sessionID) }
     var commandWithCd: String { cwd.isEmpty ? command : "cd \(shellQuote(cwd)) && \(command)" }
-}
 
-struct Group: Identifiable {
-    var id: String { cwd }
-    let cwd: String
-    let sessions: [Session]
+    /// One line to paste into a new session so the agent can find this one, including the transcript file when there is one
+    var reference: String {
+        var details: [String] = []
+        if !cwd.isEmpty { details.append("cwd: \(cwd)") }
+        if !transcriptPath.isEmpty {
+            // Codex may have compressed the rollout since the list was loaded
+            let zst = transcriptPath + ".zst"
+            let path = !FileManager.default.fileExists(atPath: transcriptPath) && FileManager.default.fileExists(atPath: zst) ? zst : transcriptPath
+            details.append("transcript: \(path)")
+        }
+        let suffix = details.isEmpty ? "" : " (\(details.joined(separator: ", ")))"
+        return "\(tool.name) session \(sessionID) \u{201C}\(title)\u{201D}\(suffix)"
+    }
 }
 
 let home = FileManager.default.homeDirectoryForCurrentUser
@@ -96,12 +106,13 @@ func loadCodex() throws -> [Session] {
     else { return [] }
     var result: [Session] = []
     try query(dir.appending(path: dbName), """
-        SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), preview), cwd, recency_at_ms
+        SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), preview), cwd, recency_at_ms, rollout_path
         FROM threads
         WHERE archived = 0 AND preview <> '' AND source NOT LIKE '{%'
         """) { stmt in
         result.append(Session(tool: .codex, sessionID: text(stmt, 0), title: text(stmt, 1), cwd: text(stmt, 2),
-                              updated: Date(timeIntervalSince1970: Double(sqlite3_column_int64(stmt, 3)) / 1000)))
+                              updated: Date(timeIntervalSince1970: Double(sqlite3_column_int64(stmt, 3)) / 1000),
+                              transcriptPath: text(stmt, 4)))
     }
     return result
 }
@@ -147,7 +158,7 @@ func claudeSession(_ file: URL) -> Session? {
         if let title, let cwd {
             let updated = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             return Session(tool: .claude, sessionID: file.deletingPathExtension().lastPathComponent,
-                           title: title, cwd: cwd, updated: updated)
+                           title: title, cwd: cwd, updated: updated, transcriptPath: file.path)
         }
         if start == 0 { return nil }
         chunk *= 4
@@ -216,17 +227,17 @@ final class Store: ObservableObject {
             self.errors = errors
         }
     }
+}
 
-    func groups(showing tools: Set<Tool>) -> [Group] {
-        // Sessions are newest first, so grouping in order of first appearance puts the most recently used directory first
-        var order: [String] = []
-        var byCwd: [String: [Session]] = [:]
-        for s in sessions where tools.contains(s.tool) {
-            if byCwd[s.cwd] == nil { order.append(s.cwd) }
-            byCwd[s.cwd, default: []].append(s)
-        }
-        return order.map { Group(cwd: $0, sessions: byCwd[$0]!) }
+/// Directories in order of their most recent session, with how many sessions each has
+func directories(_ sessions: [Session]) -> [(cwd: String, count: Int)] {
+    var order: [String] = []
+    var counts: [String: Int] = [:]
+    for s in sessions {
+        if counts[s.cwd] == nil { order.append(s.cwd) }
+        counts[s.cwd, default: 0] += 1
     }
+    return order.map { ($0, counts[$0]!) }
 }
 
 func copy(_ text: String) {
@@ -242,102 +253,27 @@ func displayPath(_ path: String) -> String {
     path.hasPrefix(home.path) ? "~" + path.dropFirst(home.path.count) : path
 }
 
-struct ToolBadge: View {
-    let tool: Tool
-
-    var body: some View {
-        Text(tool.name)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(tool.color)
-            .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(tool.color.opacity(0.15), in: Capsule())
-    }
+func folderName(_ cwd: String) -> String {
+    cwd.isEmpty ? String(localized: "No Directory") : URL(fileURLWithPath: cwd).lastPathComponent
 }
 
-struct SessionRow: View {
-    let session: Session
-    @Binding var copiedID: String?
 
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.title).lineLimit(1)
-                HStack(spacing: 6) {
-                    ToolBadge(tool: session.tool)
-                    Text(session.updated, format: .relative(presentation: .named))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            Button {
-                copy(session.command)
-                copiedID = session.id
-            } label: {
-                Label(copiedID == session.id ? "Copied" : "Copy",
-                      systemImage: copiedID == session.id ? "checkmark" : "doc.on.doc")
-            }
-            .help(session.command)
-        }
-        .contextMenu {
-            Button("Copy Resume Command") { copy(session.command) }
-            Button("Copy with cd") { copy(session.commandWithCd) }
-            Button("Copy ID") { copy(session.sessionID) }
-        }
-    }
-}
+/// Base text size for the conversation; View > Bigger / Smaller change it
+let defaultFontSize = 13.0
+let fontSizeRange = 10.0...24.0
 
-struct ContentView: View {
-    @EnvironmentObject var store: Store
-    @State private var copiedID: String?
-    // Comma-separated raw values of the tools the user has hidden
-    @AppStorage("hiddenTools") private var hiddenTools = ""
+struct FontSizeCommands: Commands {
+    @AppStorage("fontSize") private var fontSize = defaultFontSize
 
-    var shown: Set<Tool> {
-        let hidden = Set(hiddenTools.split(separator: ",").map(String.init))
-        return Set(Tool.allCases.filter { !hidden.contains($0.rawValue) })
-    }
-
-    func binding(for tool: Tool) -> Binding<Bool> {
-        Binding {
-            shown.contains(tool)
-        } set: { show in
-            var s = shown
-            if show { s.insert(tool) } else { s.remove(tool) }
-            hiddenTools = Tool.allCases.filter { !s.contains($0) }.map(\.rawValue).joined(separator: ",")
-        }
-    }
-
-    var body: some View {
-        List {
-            ForEach(store.errors, id: \.self) { Text($0).foregroundStyle(.red) }
-            ForEach(store.groups(showing: shown)) { group in
-                Section {
-                    ForEach(group.sessions) { SessionRow(session: $0, copiedID: $copiedID) }
-                } header: {
-                    HStack {
-                        Text(group.cwd.isEmpty ? String(localized: "No Directory") : URL(fileURLWithPath: group.cwd).lastPathComponent).bold()
-                        Text(displayPath(group.cwd)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        Spacer()
-                        Text("\(group.sessions.count)").foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .frame(minWidth: 460, minHeight: 300)
-        .toolbar {
-            Menu {
-                ForEach(Tool.allCases, id: \.self) { tool in
-                    Toggle(tool.name, isOn: binding(for: tool))
-                }
-            } label: {
-                Label("Tools", systemImage: "line.3.horizontal.decrease.circle")
-            }
-            Button { store.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
-                .keyboardShortcut("r")
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            store.reload()
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Divider()
+            Button("Bigger") { fontSize = min(fontSize + 1, fontSizeRange.upperBound) }
+                .keyboardShortcut("+")
+            Button("Smaller") { fontSize = max(fontSize - 1, fontSizeRange.lowerBound) }
+                .keyboardShortcut("-")
+            Button("Actual Size") { fontSize = defaultFontSize }
+                .keyboardShortcut("0")
         }
     }
 }
@@ -349,6 +285,7 @@ struct RejoinApp: App {
         Window("Rejoin", id: "main") {
             ContentView().environmentObject(store)
         }
+        .commands { FontSizeCommands() }
     }
 }
 
