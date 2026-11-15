@@ -3,7 +3,7 @@ import SQLite3
 import SwiftUI
 
 enum Tool: String, CaseIterable, Sendable {
-    case codex, claude, antigravity, copilot
+    case claude, codex, antigravity, copilot
 
     var name: String {
         switch self {
