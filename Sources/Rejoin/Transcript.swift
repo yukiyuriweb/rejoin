@@ -206,22 +206,37 @@ struct TranscriptView: View {
     let session: Session
     @State private var messages: [Message]?
     @State private var error: String?
+    /// Bumped by Reload Conversation to read the file again
+    @State private var reloads = 0
+    @State private var loadedID: String?
     @AppStorage("fontSize") private var fontSize = defaultFontSize
 
     var body: some View {
         content
-            .task(id: session.id) {
-                messages = nil
-                error = nil
+            .task(id: "\(session.id)#\(reloads)") {
+                // A reload keeps the old messages on screen until the new ones are in
+                if loadedID != session.id {
+                    messages = nil
+                    error = nil
+                    loadedID = session.id
+                }
                 let session = session
                 do {
                     messages = try await Task.detached { try loadTranscript(session) }.value
+                    error = nil
                 } catch {
                     self.error = error.localizedDescription
                 }
             }
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        reloads += 1
+                    } label: {
+                        Label("Reload Conversation", systemImage: "arrow.clockwise")
+                    }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .help("Reload Conversation")
                     Menu {
                         CopyMenuItems(session: session)
                     } label: {
