@@ -22,6 +22,7 @@
 "Reading older Codex sessions needs zstd (brew install zstd)" = "古い Codex セッションを読むには zstd が必要です（brew install zstd）";
 "zstd could not read the conversation file" = "zstd で会話ファイルを展開できませんでした";
 "Copy" = "コピー";
+"Reload Conversation" = "会話を再読み込み";
 "Copy Reference" = "参照をコピー";
 "Copy Title" = "タイトルをコピー";
 "Yesterday" = "昨日";
