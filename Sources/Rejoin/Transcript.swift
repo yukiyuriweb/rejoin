@@ -180,19 +180,49 @@ func antigravityTranscript(_ id: String) throws -> [Message] {
 struct MessageView: View {
     let message: Message
     let fontSize: Double
+    @State private var hovering = false
+    @State private var copied = false
+
+    /// Shown while the pointer is over the message; copies the whole message as its Markdown source
+    var copyButton: some View {
+        Button {
+            copy(message.text)
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                copied = false
+            }
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 22, height: 18)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .help("Copy Message")
+        .opacity(hovering || copied ? 1 : 0)
+    }
 
     var body: some View {
         switch message.role {
         case .user:
-            HStack {
-                Spacer(minLength: 80)
-                MarkdownText(source: message.text, fontSize: fontSize)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack {
+                    Spacer(minLength: 80)
+                    MarkdownText(source: message.text, fontSize: fontSize)
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                copyButton
             }
+            .onHover { hovering = $0 }
         case .assistant:
-            MarkdownText(source: message.text, fontSize: fontSize)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                MarkdownText(source: message.text, fontSize: fontSize)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                copyButton
+            }
+            .onHover { hovering = $0 }
         case .tools:
             Label("^[\(message.toolCount) tool call](inflect: true)", systemImage: "wrench.and.screwdriver")
                 .font(.system(size: fontSize - 2))
