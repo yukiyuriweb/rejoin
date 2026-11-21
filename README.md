@@ -6,6 +6,7 @@ A lightweight, native macOS list of your coding-agent sessions — [Codex](https
 - Pick a session to read its conversation — your messages and the agent's replies with their Markdown (headings, lists, tables, code), and tool calls folded into a count
 - Double-click a session (or press Return) to resume it in a new [Ghostty](https://ghostty.org) tab in its directory; without Ghostty, in a new Terminal window
 - ⌘C copies a one-line reference to the session — tool, ID, title, directory and transcript file — to paste into a new session so the agent can look it up; right-click for the ID, title or resume command alone
+- Delete a Codex or Claude Code session from the toolbar, with ⌘⌫, or by right-clicking: Codex sessions are deleted for good with `codex delete`, and a Claude Code transcript goes to the Trash with its folder of sub-agents and tool results
 - Search titles and directories; View › Bigger / Smaller (⌘+ / ⌘−) change the conversation's text size
 - Reloads when the app comes to the front, or with ⌘R
 - Written in Swift with SwiftUI only — no Electron, no dependencies
@@ -21,7 +22,7 @@ A tool that is not installed is simply skipped. Codex compresses older conversat
 
 The first time Rejoin opens a terminal tab, macOS asks to let it control Ghostty or Terminal.
 
-Rejoin is read-only: it opens each tool's files read-only and never changes them. Those files are internal to each tool, so a future update of any of them may change the format and break that part of this app.
+Rejoin opens each tool's files read-only and only changes them when you delete a session. It deletes Codex sessions through Codex's own `codex delete --force`, run in a login shell so `codex` is found on your PATH, and moves Claude Code's files to the Trash. Antigravity and Copilot sessions cannot be deleted, since neither tool has a command for it and Rejoin does not write to their databases. Those files are internal to each tool, so a future update of any of them may change the format and break that part of this app.
 
 ## Requirements
 

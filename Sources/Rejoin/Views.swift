@@ -90,6 +90,7 @@ struct ContentView: View {
     @State private var selection: SidebarItem? = .all
     @State private var selectedSessionID: String?
     @State private var search = ""
+    @State private var pendingDelete: Session?
 
     var shownSessions: [Session] {
         store.sessions.filter { s in
@@ -124,6 +125,27 @@ struct ContentView: View {
                     .keyboardShortcut("r")
                     .help("Reload")
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button { pendingDelete = session(selectedSessionID) } label: { Label("Delete", systemImage: "trash") }
+                    .keyboardShortcut(.delete)
+                    .disabled(!(session(selectedSessionID)?.tool.canDelete ?? false))
+                    .help("Delete")
+            }
+        }
+        .confirmationDialog(deleteTitle, isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            presenting: pendingDelete) { s in
+            Button("Delete", role: .destructive) {
+                if selectedSessionID == s.id { selectedSessionID = nil }
+                store.delete(s)
+            }
+        } message: { s in
+            Text(s.tool == .codex
+                 ? "The session is deleted permanently with codex delete. This cannot be undone."
+                 : "The conversation file is moved to the Trash.")
+        }
+        .alert("Could not delete the session", isPresented: Binding(get: { store.deleteError != nil }, set: { if !$0 { store.deleteError = nil } })) {
+        } message: {
+            Text(store.deleteError ?? "")
         }
         .frame(minWidth: 1000, minHeight: 520)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -197,6 +219,10 @@ struct ContentView: View {
                     Button("Open in \(terminalName)") { openInTerminal(s) }
                     Divider()
                     CopyMenuItems(session: s)
+                    if s.tool.canDelete {
+                        Divider()
+                        Button("Delete…", role: .destructive) { pendingDelete = s }
+                    }
                 }
             } primaryAction: { ids in
                 if let s = session(ids.first) { openInTerminal(s) }
@@ -215,6 +241,10 @@ struct ContentView: View {
 
     func session(_ id: String?) -> Session? {
         store.sessions.first { $0.id == id }
+    }
+
+    var deleteTitle: String {
+        pendingDelete.map { String(localized: "Delete \u{201C}\($0.title)\u{201D}?") } ?? ""
     }
 
     var title: String {

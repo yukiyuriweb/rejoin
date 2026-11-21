@@ -204,6 +204,41 @@ func loadCopilot() throws -> [Session] {
     return result
 }
 
+extension Tool {
+    /// Only tools whose sessions can be removed without writing to their private databases
+    var canDelete: Bool { self == .codex || self == .claude }
+}
+
+/// Codex deletes its own session for good with `codex delete`; a Claude Code transcript and
+/// its folder of sub-agents and tool results go to the Trash
+func deleteSession(_ session: Session) throws {
+    switch session.tool {
+    case .codex:
+        // A login shell, so codex is found on the user's PATH as in the terminal
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", "codex delete --force \"$1\"", "rejoin", session.sessionID]
+        let stderr = Pipe()
+        process.standardError = stderr
+        process.standardOutput = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        try process.run()
+        let output = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let message = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw fail(message.isEmpty ? String(localized: "codex delete failed") : message)
+        }
+    case .claude:
+        let file = URL(fileURLWithPath: session.transcriptPath)
+        let folder = file.deletingPathExtension()
+        try FileManager.default.trashItem(at: file, resultingItemURL: nil)
+        if exists(folder) { try FileManager.default.trashItem(at: folder, resultingItemURL: nil) }
+    case .antigravity, .copilot:
+        throw fail(String(localized: "\(session.tool.name) sessions cannot be deleted"))
+    }
+}
+
 func loadAll() -> (sessions: [Session], errors: [String]) {
     let loaders: [(Tool, () throws -> [Session])] = [
         (.codex, loadCodex), (.claude, loadClaude), (.antigravity, loadAntigravity), (.copilot, loadCopilot),
@@ -219,12 +254,24 @@ func loadAll() -> (sessions: [Session], errors: [String]) {
 final class Store: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var errors: [String] = []
+    @Published var deleteError: String?
 
     func reload() {
         Task {
             let (sessions, errors) = await Task.detached { loadAll() }.value
             self.sessions = sessions
             self.errors = errors
+        }
+    }
+
+    func delete(_ session: Session) {
+        Task {
+            do {
+                try await Task.detached { try deleteSession(session) }.value
+            } catch {
+                deleteError = error.localizedDescription
+            }
+            reload()
         }
     }
 }
