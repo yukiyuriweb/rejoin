@@ -30,3 +30,13 @@
 "Bigger" = "拡大";
 "Smaller" = "縮小";
 "Actual Size" = "実際のサイズ";
+
+/* Deleting */
+"Delete" = "削除";
+"Delete…" = "削除…";
+"Delete “%@”?" = "「%@」を削除しますか？";
+"The session is deleted permanently with codex delete. This cannot be undone." = "codex delete でセッションを完全に削除します。元に戻せません。";
+"The conversation file is moved to the Trash." = "会話ファイルをゴミ箱に移します。";
+"Could not delete the session" = "セッションを削除できませんでした";
+"codex delete failed" = "codex delete に失敗しました";
+"%@ sessions cannot be deleted" = "%@ のセッションは削除できません";
