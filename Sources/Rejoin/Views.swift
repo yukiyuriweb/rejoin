@@ -114,6 +114,8 @@ struct ContentView: View {
         } detail: {
             if let session = session(selectedSessionID) {
                 TranscriptView(session: session)
+                    // Lets other apps (such as time trackers) read the session's directory through the Accessibility API.
+                    .navigationDocument(URL(fileURLWithPath: session.cwd.isEmpty ? home.path : session.cwd))
             } else {
                 ContentUnavailableView("Select a Session", systemImage: "text.bubble")
             }
