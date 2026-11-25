@@ -6,6 +6,7 @@ A lightweight, native macOS list of your coding-agent sessions — [Codex](https
 - Pick a session to read its conversation — your messages and the agent's replies with their Markdown (headings, lists, tables, code), and tool calls folded into a count
 - Double-click a session (or press Return) to resume it in a new [Ghostty](https://ghostty.org) tab in its directory; without Ghostty, in a new Terminal window
 - ⌘C copies a one-line reference to the session — tool, ID, title, directory and transcript file — to paste into a new session so the agent can look it up; right-click for the ID, title or resume command alone
+- Archive or restore sessions from the toolbar or right-click menu. Switch between **Active**, **Archived**, and **All** at the top of the session list. The list opens in **Active**.
 - Delete a Codex or Claude Code session from the toolbar, with ⌘⌫, or by right-clicking: Codex sessions are deleted for good with `codex delete`, and a Claude Code transcript goes to the Trash with its folder of sub-agents and tool results
 - Search titles and directories; View › Bigger / Smaller (⌘+ / ⌘−) change the conversation's text size
 - Reloads when the app comes to the front, or with ⌘R
@@ -13,7 +14,7 @@ A lightweight, native macOS list of your coding-agent sessions — [Codex](https
 
 | Tool | Read from | Resume command |
 |---|---|---|
-| Codex | `~/.codex/state_*.sqlite` (unarchived, user-started threads) | `codex resume <id>` |
+| Codex | `~/.codex/state_*.sqlite` (user-started threads) | `codex resume <id>` |
 | Claude Code | `~/.claude/projects/*/<id>.jsonl` (sub-agents left out) | `claude --resume <id>` |
 | Antigravity CLI | `~/.gemini/antigravity-cli/conversation_summaries.db` (top-level conversations) | `agy --conversation <id>` |
 | Copilot CLI | `~/.copilot/session-store.db` | `copilot --resume=<id>` |
@@ -22,7 +23,9 @@ A tool that is not installed is simply skipped. Codex compresses older conversat
 
 The first time Rejoin opens a terminal tab, macOS asks to let it control Ghostty or Terminal.
 
-Rejoin opens each tool's files read-only and only changes them when you delete a session. It deletes Codex sessions through Codex's own `codex delete --force`, run in a login shell so `codex` is found on your PATH, and moves Claude Code's files to the Trash. Antigravity and Copilot sessions cannot be deleted, since neither tool has a command for it and Rejoin does not write to their databases. Those files are internal to each tool, so a future update of any of them may change the format and break that part of this app.
+Rejoin opens each tool's databases read-only. Codex archiving and restoring use `codex archive` and `codex unarchive`, so those changes are shared with Codex. Restore an archived Codex session in Rejoin before resuming it. Rejoin stores archive status for Claude Code, Antigravity, and Copilot in its own preferences.
+
+Rejoin deletes Codex sessions through `codex delete --force` and moves Claude Code's files to the Trash. It runs all Codex commands in a login shell so `codex` is found on your PATH. Antigravity and Copilot sessions cannot be deleted. The files Rejoin reads are internal to each tool, so a future update may change their format.
 
 ## Requirements
 

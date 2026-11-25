@@ -49,6 +49,12 @@ struct SessionRow: View {
                     Text(session.title)
                         .font(.body.weight(.semibold))
                         .lineLimit(1)
+                    if session.isArchived {
+                        Label("Archived", systemImage: "archivebox")
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(.secondary)
+                            .help("Archived")
+                    }
                     Spacer(minLength: 6)
                     Text(shortDate(session.updated))
                         .font(.subheadline)
@@ -73,9 +79,26 @@ struct CopyMenuItems: View {
         Button("Copy Reference") { copy(session.reference) }
         Button("Copy ID") { copy(session.sessionID) }
         Button("Copy Title") { copy(session.title) }
-        Divider()
-        Button("Copy Resume Command") { copy(session.command) }
-        Button("Copy with cd") { copy(session.commandWithCd) }
+        if session.canResume {
+            Divider()
+            Button("Copy Resume Command") { copy(session.command) }
+            Button("Copy with cd") { copy(session.commandWithCd) }
+        }
+    }
+}
+
+struct ArchiveButton: View {
+    @EnvironmentObject var store: Store
+    let session: Session
+
+    var title: LocalizedStringKey { session.isArchived ? "Restore from Archive" : "Archive" }
+
+    var body: some View {
+        Button { store.toggleArchive(session) } label: {
+            Label(title, systemImage: session.isArchived ? "arrow.up.bin" : "archivebox")
+        }
+        .disabled(store.changingSessions.contains(session.id))
+        .help(Text(title))
     }
 }
 
@@ -85,22 +108,115 @@ enum SidebarItem: Hashable {
     case folder(String)
 }
 
+enum SessionFilter: CaseIterable, Hashable {
+    case active, archived, all
+
+    var label: LocalizedStringKey {
+        switch self {
+        case .active: "Active"
+        case .archived: "Archived"
+        case .all: "All"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .active: "tray"
+        case .archived: "archivebox"
+        case .all: "square.stack"
+        }
+    }
+
+    func includes(_ session: Session) -> Bool {
+        switch self {
+        case .active: !session.isArchived
+        case .archived: session.isArchived
+        case .all: true
+        }
+    }
+}
+
+struct SessionFilterBar: View {
+    @Binding var selection: SessionFilter
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var focusedFilter: SessionFilter?
+    @State private var hasReceivedFocus = false
+
+    var body: some View {
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 8) {
+                ForEach(SessionFilter.allCases, id: \.self) { filter in
+                    let selected = selection == filter
+                    Button { selection = filter } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: filter.symbol)
+                                .font(.system(size: 14, weight: .semibold))
+                            if selected {
+                                Text(filter.label)
+                                    .font(.callout.weight(.semibold))
+                                    .lineLimit(1)
+                                    .transition(.opacity)
+                            }
+                        }
+                        .foregroundStyle(selected ? .primary : .secondary)
+                        .frame(minWidth: 42, maxWidth: selected ? .infinity : 42, minHeight: 32)
+                        .contentShape(.rect(cornerRadius: 10))
+                        .glassEffect(
+                            .regular.tint(selected ? Color.teal.opacity(0.35) : nil).interactive(),
+                            in: .rect(cornerRadius: 10)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .focused($focusedFilter, equals: filter)
+                    .help(Text(filter.label))
+                    .accessibilityLabel(Text(filter.label))
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+        }
+        .onChange(of: focusedFilter) { _, focused in
+            guard focused != nil, !hasReceivedFocus else { return }
+            hasReceivedFocus = true
+            // The first button can receive focus automatically when the window opens.
+            switch NSApp.currentEvent?.type {
+            case .keyDown, .leftMouseDown, .leftMouseUp: break
+            default: focusedFilter = nil
+            }
+        }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: selection)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Session Filter")
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var store: Store
     @State private var selection: SidebarItem? = .all
     @State private var selectedSessionID: String?
     @State private var search = ""
+    @State private var filter: SessionFilter = .active
     @State private var pendingDelete: Session?
 
-    var shownSessions: [Session] {
-        store.sessions.filter { s in
-            switch selection {
-            case .tool(let tool): if s.tool != tool { return false }
-            case .folder(let cwd): if s.cwd != cwd { return false }
-            case .all, nil: break
-            }
-            return search.isEmpty || s.title.localizedCaseInsensitiveContains(search) || s.cwd.localizedCaseInsensitiveContains(search)
+    var sidebarSessions: [Session] {
+        store.sessions.filter(filter.includes)
+    }
+
+    func isShown(_ session: Session) -> Bool {
+        guard filter.includes(session) else { return false }
+        switch selection {
+        case .tool(let tool): if session.tool != tool { return false }
+        case .folder(let cwd): if session.cwd != cwd { return false }
+        case .all, nil: break
         }
+        return search.isEmpty || session.title.localizedCaseInsensitiveContains(search)
+            || session.cwd.localizedCaseInsensitiveContains(search)
+    }
+
+    var selectedSession: Session? { session(selectedSessionID) }
+
+    var hasSelectedFolder: Bool {
+        guard case .folder(let cwd) = selection else { return true }
+        return store.sessions.contains { $0.cwd == cwd }
     }
 
     var body: some View {
@@ -108,11 +224,17 @@ struct ContentView: View {
             sidebar
                 .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 320)
         } content: {
-            sessionList
-                .navigationSplitViewColumnWidth(min: 300, ideal: 360)
-                .navigationTitle(title)
+            VStack(alignment: .leading, spacing: 0) {
+                SessionFilterBar(selection: $filter)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                sessionList
+                    .frame(maxHeight: .infinity)
+            }
+            .navigationSplitViewColumnWidth(min: 300, ideal: 360)
+            .navigationTitle(title)
         } detail: {
-            if let session = session(selectedSessionID) {
+            if let session = selectedSession {
                 TranscriptView(session: session)
                     // Lets other apps (such as time trackers) read the session's directory through the Accessibility API.
                     .navigationDocument(URL(fileURLWithPath: session.cwd.isEmpty ? home.path : session.cwd))
@@ -128,9 +250,12 @@ struct ContentView: View {
                     .help("Reload")
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { pendingDelete = session(selectedSessionID) } label: { Label("Delete", systemImage: "trash") }
+                if let session = selectedSession { ArchiveButton(session: session) }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { pendingDelete = selectedSession } label: { Label("Delete", systemImage: "trash") }
                     .keyboardShortcut(.delete)
-                    .disabled(!(session(selectedSessionID)?.tool.canDelete ?? false))
+                    .disabled(!canDelete(selectedSession))
                     .help("Delete")
             }
         }
@@ -149,20 +274,34 @@ struct ContentView: View {
         } message: {
             Text(store.deleteError ?? "")
         }
+        .alert("Could not change the archive status", isPresented: Binding(get: { store.archiveError != nil }, set: { if !$0 { store.archiveError = nil } })) {
+        } message: {
+            Text(store.archiveError ?? "")
+        }
         .frame(minWidth: 1000, minHeight: 520)
+        .onChange(of: selectedSession?.id) { _, id in
+            if id == nil { selectedSessionID = nil }
+        }
+        .onChange(of: hasSelectedFolder) { _, exists in
+            if !exists { selection = .all }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.reload()
         }
     }
 
     var sidebar: some View {
-        let dirs = directories(store.sessions)
+        let sessions = sidebarSessions
+        var dirs = directories(sessions)
+        if case .folder(let cwd) = selection, hasSelectedFolder, !dirs.contains(where: { $0.cwd == cwd }) {
+            dirs.append((cwd: cwd, count: 0))
+        }
         // Folder names that occur more than once get their parent folder alongside
         let names = Dictionary(grouping: dirs.map { folderName($0.cwd) }, by: { $0 }).filter { $0.value.count > 1 }
         return List(selection: $selection) {
             Section {
                 Label("All Sessions", systemImage: "tray.full")
-                    .badge(store.sessions.count)
+                    .badge(sessions.count)
                     .tag(SidebarItem.all)
                 ForEach(Tool.allCases, id: \.self) { tool in
                     Label {
@@ -170,7 +309,7 @@ struct ContentView: View {
                     } icon: {
                         ToolIcon(tool: tool, size: 18)
                     }
-                    .badge(store.sessions.filter { $0.tool == tool }.count)
+                    .badge(sessions.filter { $0.tool == tool }.count)
                     .tag(SidebarItem.tool(tool))
                 }
             }
@@ -198,7 +337,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder var sessionList: some View {
-        let sessions = shownSessions
+        let sessions = store.sessions.filter(isShown)
         if sessions.isEmpty && store.errors.isEmpty {
             if search.isEmpty {
                 ContentUnavailableView("No Sessions", systemImage: "tray")
@@ -218,19 +357,24 @@ struct ContentView: View {
             // Double-click or Return resumes the session in the terminal
             .contextMenu(forSelectionType: String.self) { ids in
                 if let s = session(ids.first) {
-                    Button("Open in \(terminalName)") { openInTerminal(s) }
-                    Divider()
+                    if s.canResume {
+                        Button("Open in \(terminalName)") { openInTerminal(s) }
+                        Divider()
+                    }
                     CopyMenuItems(session: s)
+                    Divider()
+                    ArchiveButton(session: s)
                     if s.tool.canDelete {
                         Divider()
                         Button("Delete…", role: .destructive) { pendingDelete = s }
+                            .disabled(!canDelete(s))
                     }
                 }
             } primaryAction: { ids in
-                if let s = session(ids.first) { openInTerminal(s) }
+                if let s = session(ids.first), s.canResume { openInTerminal(s) }
             }
             .onCopyCommand {
-                session(selectedSessionID).map { [NSItemProvider(object: $0.reference as NSString)] } ?? []
+                selectedSession.map { [NSItemProvider(object: $0.reference as NSString)] } ?? []
             }
         }
     }
@@ -242,7 +386,13 @@ struct ContentView: View {
     }
 
     func session(_ id: String?) -> Session? {
-        store.sessions.first { $0.id == id }
+        guard let id else { return nil }
+        return store.sessions.first { $0.id == id && isShown($0) }
+    }
+
+    func canDelete(_ session: Session?) -> Bool {
+        guard let session else { return false }
+        return session.tool.canDelete && !store.changingSessions.contains(session.id)
     }
 
     var deleteTitle: String {
