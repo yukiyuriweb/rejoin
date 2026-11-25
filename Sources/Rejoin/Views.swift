@@ -367,11 +367,15 @@ struct ContentView: View {
                     if s.tool.canDelete {
                         Divider()
                         Button("Delete…", role: .destructive) { pendingDelete = s }
+                            .keyboardShortcut(.delete, modifiers: [])
                             .disabled(!canDelete(s))
                     }
                 }
             } primaryAction: { ids in
                 if let s = session(ids.first), s.canResume { openInTerminal(s) }
+            }
+            .onDeleteCommand {
+                if let session = selectedSession, canDelete(session) { pendingDelete = session }
             }
             .onCopyCommand {
                 selectedSession.map { [NSItemProvider(object: $0.reference as NSString)] } ?? []

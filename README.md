@@ -7,7 +7,7 @@ A lightweight, native macOS list of your coding-agent sessions — [Codex](https
 - Double-click a session (or press Return) to resume it in a new [Ghostty](https://ghostty.org) tab in its directory; without Ghostty, in a new Terminal window
 - ⌘C copies a one-line reference to the session — tool, ID, title, directory and transcript file — to paste into a new session so the agent can look it up; right-click for the ID, title or resume command alone
 - Archive or restore sessions from the toolbar or right-click menu. Switch between **Active**, **Archived**, and **All** at the top of the session list. The list opens in **Active**.
-- Delete a Codex or Claude Code session from the toolbar, with ⌘⌫, or by right-clicking: Codex sessions are deleted for good with `codex delete`, and a Claude Code transcript goes to the Trash with its folder of sub-agents and tool results
+- Delete a Codex or Claude Code session from the toolbar, with ⌘⌫, by pressing Delete (⌫) in the session list, or by right-clicking: Codex sessions are deleted for good with `codex delete`, and a Claude Code transcript goes to the Trash with its folder of sub-agents and tool results
 - Search titles and directories; View › Bigger / Smaller (⌘+ / ⌘−) change the conversation's text size
 - Reloads when the app comes to the front, or with ⌘R
 - Written in Swift with SwiftUI only — no Electron, no dependencies
