@@ -243,7 +243,7 @@ struct TranscriptView: View {
 
     var body: some View {
         content
-            .task(id: "\(session.id)#\(reloads)") {
+            .task(id: "\(session.id)#\(session.transcriptPath)#\(reloads)") {
                 // A reload keeps the old messages on screen until the new ones are in
                 if loadedID != session.id {
                     messages = nil
@@ -252,9 +252,12 @@ struct TranscriptView: View {
                 }
                 let session = session
                 do {
-                    messages = try await Task.detached { try loadTranscript(session) }.value
+                    let loaded = try await Task.detached { try loadTranscript(session) }.value
+                    guard !Task.isCancelled else { return }
+                    messages = loaded
                     error = nil
                 } catch {
+                    guard !Task.isCancelled else { return }
                     self.error = error.localizedDescription
                 }
             }
@@ -275,12 +278,14 @@ struct TranscriptView: View {
                         copy(session.reference)
                     }
                     .help(String(localized: "Copy Reference") + ": " + session.reference)
-                    Button {
-                        openInTerminal(session)
-                    } label: {
-                        Label("Resume", systemImage: "play.fill")
+                    if session.canResume {
+                        Button {
+                            openInTerminal(session)
+                        } label: {
+                            Label("Resume", systemImage: "play.fill")
+                        }
+                        .help(String(localized: "Open in \(terminalName)") + ": " + session.command)
                     }
-                    .help(String(localized: "Open in \(terminalName)") + ": " + session.command)
                 }
             }
     }

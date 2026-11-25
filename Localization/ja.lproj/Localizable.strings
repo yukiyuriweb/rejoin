@@ -8,6 +8,17 @@
 "No Sessions" = "セッションがありません";
 "No Directory" = "ディレクトリなし";
 
+/* Archiving */
+"Session Filter" = "セッションの絞り込み";
+"Active" = "未アーカイブ";
+"Archived" = "アーカイブ済み";
+"All" = "すべて";
+"Archive" = "アーカイブ";
+"Restore from Archive" = "アーカイブから戻す";
+"Could not change the archive status" = "アーカイブ状態を変更できませんでした";
+"codex archive failed" = "codex archive に失敗しました";
+"codex unarchive failed" = "codex unarchive に失敗しました";
+
 /* Errors */
 "Could not open %@" = "%@ を開けません";
 

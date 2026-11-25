@@ -42,7 +42,9 @@ struct Session: Identifiable, Sendable {
     let updated: Date
     /// The JSONL holding the conversation, for the tools that keep one per session
     var transcriptPath = ""
+    var isArchived = false
 
+    var canResume: Bool { tool != .codex || !isArchived }
     var command: String { tool.resumeCommand(sessionID) }
     var commandWithCd: String { cwd.isEmpty ? command : "cd \(shellQuote(cwd)) && \(command)" }
 
@@ -95,7 +97,7 @@ func query(_ path: URL, _ sql: String, row: (OpaquePointer?) -> Void) throws {
 
 func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
 
-/// Codex: unarchived, user-started threads in ~/.codex/state_*.sqlite
+/// Codex: user-started threads in ~/.codex/state_*.sqlite
 func loadCodex() throws -> [Session] {
     let dir = home.appending(path: ".codex")
     guard exists(dir) else { return [] }
@@ -106,13 +108,13 @@ func loadCodex() throws -> [Session] {
     else { return [] }
     var result: [Session] = []
     try query(dir.appending(path: dbName), """
-        SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), preview), cwd, recency_at_ms, rollout_path
+        SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), preview), cwd, recency_at_ms, rollout_path, archived
         FROM threads
-        WHERE archived = 0 AND preview <> '' AND source NOT LIKE '{%'
+        WHERE preview <> '' AND source NOT LIKE '{%'
         """) { stmt in
         result.append(Session(tool: .codex, sessionID: text(stmt, 0), title: text(stmt, 1), cwd: text(stmt, 2),
                               updated: Date(timeIntervalSince1970: Double(sqlite3_column_int64(stmt, 3)) / 1000),
-                              transcriptPath: text(stmt, 4)))
+                              transcriptPath: text(stmt, 4), isArchived: sqlite3_column_int(stmt, 5) != 0))
     }
     return result
 }
@@ -209,26 +211,30 @@ extension Tool {
     var canDelete: Bool { self == .codex || self == .claude }
 }
 
+func runCodex(_ arguments: [String], failureMessage: String) throws {
+    // A login shell finds codex on the same PATH as the terminal.
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    process.arguments = ["-lc", "exec codex \"$@\"", "rejoin"] + arguments
+    let stderr = Pipe()
+    process.standardError = stderr
+    process.standardOutput = FileHandle.nullDevice
+    process.standardInput = FileHandle.nullDevice
+    try process.run()
+    let output = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        let message = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        throw fail(message.isEmpty ? failureMessage : message)
+    }
+}
+
 /// Codex deletes its own session for good with `codex delete`; a Claude Code transcript and
 /// its folder of sub-agents and tool results go to the Trash
 func deleteSession(_ session: Session) throws {
     switch session.tool {
     case .codex:
-        // A login shell, so codex is found on the user's PATH as in the terminal
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", "codex delete --force \"$1\"", "rejoin", session.sessionID]
-        let stderr = Pipe()
-        process.standardError = stderr
-        process.standardOutput = FileHandle.nullDevice
-        process.standardInput = FileHandle.nullDevice
-        try process.run()
-        let output = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw fail(message.isEmpty ? String(localized: "codex delete failed") : message)
-        }
+        try runCodex(["delete", "--force", session.sessionID], failureMessage: String(localized: "codex delete failed"))
     case .claude:
         let file = URL(fileURLWithPath: session.transcriptPath)
         let folder = file.deletingPathExtension()
@@ -255,23 +261,80 @@ final class Store: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var errors: [String] = []
     @Published var deleteError: String?
+    @Published var archiveError: String?
+    @Published private(set) var changingSessions = Set<String>()
 
-    func reload() {
-        Task {
+    private let archiveKey = "archivedSessionIDs"
+    private var reloadTask: Task<Void, Never>?
+
+    private var localArchive: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: archiveKey) ?? []) }
+        set { UserDefaults.standard.set(newValue.sorted(), forKey: archiveKey) }
+    }
+
+    @discardableResult
+    func reload() -> Task<Void, Never> {
+        reloadTask?.cancel()
+        let task = Task {
             let (sessions, errors) = await Task.detached { loadAll() }.value
-            self.sessions = sessions
+            guard !Task.isCancelled else { return }
+            let archived = self.localArchive
+            self.sessions = sessions.map { session in
+                guard session.tool != .codex else { return session }
+                var session = session
+                session.isArchived = archived.contains(session.id)
+                return session
+            }
             self.errors = errors
+        }
+        reloadTask = task
+        return task
+    }
+
+    func toggleArchive(_ session: Session) {
+        guard !changingSessions.contains(session.id) else { return }
+        if session.tool != .codex {
+            if session.isArchived {
+                localArchive.remove(session.id)
+            } else {
+                localArchive.insert(session.id)
+            }
+            if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+                sessions[index].isArchived = !session.isArchived
+            }
+            return
+        }
+
+        changingSessions.insert(session.id)
+        Task {
+            defer { changingSessions.remove(session.id) }
+            do {
+                try await Task.detached {
+                    if session.isArchived {
+                        try runCodex(["unarchive", session.sessionID], failureMessage: String(localized: "codex unarchive failed"))
+                    } else {
+                        try runCodex(["archive", session.sessionID], failureMessage: String(localized: "codex archive failed"))
+                    }
+                }.value
+                await reload().value
+            } catch {
+                archiveError = error.localizedDescription
+                reload()
+            }
         }
     }
 
     func delete(_ session: Session) {
+        guard changingSessions.insert(session.id).inserted else { return }
         Task {
+            defer { changingSessions.remove(session.id) }
             do {
                 try await Task.detached { try deleteSession(session) }.value
+                localArchive.remove(session.id)
             } catch {
                 deleteError = error.localizedDescription
             }
-            reload()
+            await reload().value
         }
     }
 }
