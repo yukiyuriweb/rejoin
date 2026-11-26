@@ -416,23 +416,16 @@ struct RejoinApp: App {
 
     var body: some Scene {
         Window("Rejoin", id: "main") {
-            MainWindowContent(appDelegate: appDelegate)
+            ContentView()
+                .environmentObject(appDelegate.store)
         }
         .commands { FontSizeCommands() }
-    }
-}
 
-private struct MainWindowContent: View {
-    @Environment(\.openWindow) private var openWindow
-    let appDelegate: RejoinAppDelegate
-
-    var body: some View {
-        ContentView()
-            .environmentObject(appDelegate.store)
-            .onAppear {
-                let openWindow = openWindow
-                appDelegate.openMainWindow = { openWindow(id: "main") }
-            }
+        MenuBarExtra("Rejoin Usage", systemImage: "gauge.with.dots.needle.50percent") {
+            UsageMenu()
+                .environmentObject(appDelegate.store)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 

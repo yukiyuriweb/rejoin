@@ -1,8 +1,10 @@
+import ServiceManagement
 import SwiftUI
 
 struct UsageMenu: View {
     @EnvironmentObject private var store: Store
-    let openMainWindow: () -> Void
+    @Environment(\.openWindow) private var openWindow
+    @State private var openAtLogin = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -36,14 +38,100 @@ struct UsageMenu: View {
                 }
             }
 
-            Button(action: openMainWindow) {
-                Label("Open Rejoin", systemImage: "macwindow")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
+            footer
         }
         .padding(14)
         .frame(width: 340)
+        .background(WindowVisibility { visible in
+            guard visible else { return }
+            store.reloadUsage()
+            openAtLogin = Self.isOpenAtLogin
+        })
+    }
+
+    private var footer: some View {
+        HStack {
+            Button {
+                NSApp.activate()
+                openWindow(id: "main")
+            } label: {
+                Label("Open Rejoin", systemImage: "macwindow")
+            }
+            Spacer()
+            Menu {
+                Button("Refresh") { store.refresh() }
+                Toggle("Open at Login", isOn: Binding(
+                    get: { openAtLogin },
+                    set: { on in
+                        do {
+                            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+                        } catch {
+                            NSApp.activate()
+                            NSAlert(error: error).runModal()
+                        }
+                        openAtLogin = Self.isOpenAtLogin
+                    }))
+                Divider()
+                Button("Quit Rejoin") { NSApp.terminate(nil) }
+            } label: {
+                Label("More", systemImage: "ellipsis")
+            }
+            .labelStyle(.iconOnly)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .buttonStyle(.glass)
+    }
+
+    /// Waiting for approval in System Settings counts as on, so the toggle turns it off
+    private static var isOpenAtLogin: Bool {
+        [.enabled, .requiresApproval].contains(SMAppService.mainApp.status)
+    }
+}
+
+/// Reports whether the window holding it is on screen, from the window's occlusion state. The menu bar
+/// panel is hidden rather than closed, so this is how it learns that it has been opened again.
+private struct WindowVisibility: NSViewRepresentable {
+    let onChange: @MainActor (Bool) -> Void
+
+    func makeNSView(context: Context) -> Tracker { Tracker(onChange: onChange) }
+    func updateNSView(_ view: Tracker, context: Context) { view.onChange = onChange }
+
+    final class Tracker: NSView {
+        var onChange: @MainActor (Bool) -> Void
+        private var observer: NSObjectProtocol?
+
+        init(onChange: @escaping @MainActor (Bool) -> Void) {
+            self.onChange = onChange
+            super.init(frame: .zero)
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        isolated deinit {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            guard let window else { return report() }
+            observer = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification,
+                                                              object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.report() }
+            }
+            report()
+        }
+
+        /// Deferred, since this view joins its window in the middle of a SwiftUI update, when changing state
+        /// isn't allowed
+        private func report() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                onChange(window?.occlusionState.contains(.visible) == true)
+            }
+        }
     }
 }
 
