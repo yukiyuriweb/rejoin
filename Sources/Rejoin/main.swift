@@ -211,11 +211,16 @@ extension Tool {
     var canDelete: Bool { self == .codex || self == .claude }
 }
 
-func runCodex(_ arguments: [String], failureMessage: String) throws {
+func codexProcess(_ arguments: [String]) -> Process {
     // A login shell finds codex on the same PATH as the terminal.
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/zsh")
     process.arguments = ["-lc", "exec codex \"$@\"", "rejoin"] + arguments
+    return process
+}
+
+func runCodex(_ arguments: [String], failureMessage: String) throws {
+    let process = codexProcess(arguments)
     let stderr = Pipe()
     process.standardError = stderr
     process.standardOutput = FileHandle.nullDevice
@@ -262,6 +267,9 @@ final class Store: ObservableObject {
     @Published var errors: [String] = []
     @Published var deleteError: String?
     @Published var archiveError: String?
+    @Published private(set) var codexUsage: UsageSnapshot?
+    @Published private(set) var claudeUsage: UsageSnapshot?
+    @Published private(set) var isRefreshingUsage = false
     @Published private(set) var changingSessions = Set<String>()
 
     private let archiveKey = "archivedSessionIDs"
@@ -289,6 +297,21 @@ final class Store: ObservableObject {
         }
         reloadTask = task
         return task
+    }
+
+    func reloadUsage() {
+        claudeUsage = ClaudeUsage.load()
+        guard !isRefreshingUsage else { return }
+        isRefreshingUsage = true
+        Task {
+            codexUsage = await Task.detached(priority: .utility) { CodexUsage.load() }.value
+            isRefreshingUsage = false
+        }
+    }
+
+    func refresh() {
+        reload()
+        reloadUsage()
     }
 
     func toggleArchive(_ session: Session) {
@@ -389,14 +412,36 @@ struct FontSizeCommands: Commands {
 }
 
 struct RejoinApp: App {
-    @StateObject private var store = Store()
+    @NSApplicationDelegateAdaptor(RejoinAppDelegate.self) private var appDelegate
 
     var body: some Scene {
         Window("Rejoin", id: "main") {
-            ContentView().environmentObject(store)
+            MainWindowContent(appDelegate: appDelegate)
         }
         .commands { FontSizeCommands() }
     }
 }
 
-RejoinApp.main()
+private struct MainWindowContent: View {
+    @Environment(\.openWindow) private var openWindow
+    let appDelegate: RejoinAppDelegate
+
+    var body: some View {
+        ContentView()
+            .environmentObject(appDelegate.store)
+            .onAppear {
+                let openWindow = openWindow
+                appDelegate.openMainWindow = { openWindow(id: "main") }
+            }
+    }
+}
+
+if CommandLine.arguments.dropFirst().first == "--record-claude-usage" {
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    try? ClaudeUsage.record(input)
+    if CommandLine.arguments.dropFirst(2).first == "--passthrough" {
+        try? FileHandle.standardOutput.write(contentsOf: input)
+    }
+} else {
+    RejoinApp.main()
+}

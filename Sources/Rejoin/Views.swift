@@ -245,7 +245,7 @@ struct ContentView: View {
         .searchable(text: $search, placement: .sidebar)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Button { store.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                Button { store.refresh() } label: { Label("Reload", systemImage: "arrow.clockwise") }
                     .keyboardShortcut("r")
                     .help("Reload")
             }
@@ -286,8 +286,9 @@ struct ContentView: View {
             if !exists { selection = .all }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            store.reload()
+            store.refresh()
         }
+        .task { store.reloadUsage() }
     }
 
     var sidebar: some View {
