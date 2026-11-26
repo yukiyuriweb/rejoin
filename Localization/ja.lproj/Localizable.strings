@@ -8,6 +8,23 @@
 "No Sessions" = "セッションがありません";
 "No Directory" = "ディレクトリなし";
 
+/* Usage limits */
+"Rejoin Usage" = "Rejoin の利用枠";
+"Usage Limits" = "利用枠";
+"Refresh Usage" = "利用枠を更新";
+"Refreshing Usage" = "利用枠を更新中";
+"Open Rejoin" = "Rejoin を開く";
+"Refresh" = "更新";
+"Open at Login" = "ログイン時に開く";
+"Quit Rejoin" = "Rejoin を終了";
+"Claude Code Setup" = "Claude Code の連携設定";
+"5h left" = "5時間残り";
+"Weekly left" = "週間残り";
+"Received %@" = "受信 %@";
+"Resets %@" = "リセット %@";
+"Copy Claude Code Usage Command" = "Claude Code の残量取得コマンドをコピー";
+"Copy Claude Code Usage Pipe" = "既存のステータスラインに追加するコマンドをコピー";
+
 /* Archiving */
 "Session Filter" = "セッションの絞り込み";
 "Active" = "未アーカイブ";
